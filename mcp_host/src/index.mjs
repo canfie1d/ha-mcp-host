@@ -78,8 +78,20 @@ function page() {
     .join('');
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>MCP Host</title>
-<style>body{font:15px system-ui;margin:16px;max-width:900px}table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-bottom:1px solid #8884;text-align:left}
-.healthy{color:#1a7f37}.unhealthy,.failed{color:#cf222e}.healing,.starting,.needs-secrets{color:#9a6700}</style>
+<meta http-equiv=refresh content=30>
+<style>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--muted:#656d76;--line:#d0d7de;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700}
+@media (prefers-color-scheme:dark){:root{--bg:#161b22;--fg:#e6edf3;--muted:#9198a1;--line:#30363d;--ok:#3fb950;--bad:#f85149;--warn:#d29922}}
+html,body{background:var(--bg);color:var(--fg)}
+body{font:15px/1.45 system-ui,-apple-system,sans-serif;margin:0;padding:16px;max-width:900px}
+h2,h3{margin:0 0 12px}h3{margin-top:24px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:13px}
+td:last-child{color:var(--muted);word-break:break-word}
+.healthy{color:var(--ok)}.unhealthy,.failed{color:var(--bad)}.healing,.starting,.needs-secrets{color:var(--warn)}
+td.healthy,td.unhealthy,td.failed,td.healing,td.starting,td.needs-secrets{font-weight:600;white-space:nowrap}
+</style>
 <h2>MCP Host</h2>
 <table><tr><th>App</th><th>Status</th><th>Port</th><th>Last good</th><th>Patches today</th><th>Detail</th></tr>${rows}</table>
 <h3>Recent incidents</h3><ul>${inc || '<li>None</li>'}</ul>`;
