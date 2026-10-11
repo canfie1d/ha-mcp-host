@@ -45,14 +45,28 @@ export class ManagedApp {
   }
 
   async sync() {
+    const token = this.options.github_token;
+    const auth = token && /^https:\/\/github\.com\//.test(this.def.repo)
+      ? `-c http.extraheader="AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}" `
+      : '';
+    const scrub = (t) => (token ? t.replaceAll(token, '***') : t);
     if (!fileExists(path.join(this.repoDir, '.git'))) {
-      const token = this.options.github_token;
-      const auth = token && /^https:\/\/github\.com\//.test(this.def.repo)
-        ? `-c http.extraheader="AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}" `
-        : '';
       const r = await run(`git ${auth}clone --branch ${this.def.ref} ${this.def.repo} ${this.repoDir}`);
-      if (r.code !== 0) throw new Error(`clone failed: ${r.output.replaceAll(token || '\0', '***').slice(-500)}`);
+      if (r.code !== 0) throw new Error(`clone failed: ${scrub(r.output).slice(-500)}`);
+      return;
     }
+    // Existing checkout: fast-forward to the upstream ref. A diverged checkout
+    // (e.g. a locally kept auto-patch) is left alone rather than clobbered.
+    const f = await run(`git ${auth}fetch origin ${this.def.ref}`, { cwd: this.repoDir });
+    if (f.code !== 0) {
+      log(this.name, `fetch failed, using existing checkout: ${scrub(f.output).slice(-200)}`);
+      return;
+    }
+    const before = await this.head();
+    const m = await run('git merge --ff-only FETCH_HEAD', { cwd: this.repoDir });
+    const after = await this.head();
+    if (m.code !== 0) log(this.name, 'checkout has local commits; not fast-forwarding');
+    else if (after !== before) log(this.name, `updated ${before.slice(0, 8)} -> ${after.slice(0, 8)}`);
   }
 
   /** Install and build. Install/build run with devDependencies available. */
