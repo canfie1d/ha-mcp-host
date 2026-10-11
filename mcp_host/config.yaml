@@ -1,0 +1,44 @@
+name: MCP Host
+version: "0.1.0"
+slug: mcp_host
+description: Hosts your MCP servers and automatically heals them when they break
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+homeassistant_api: true
+ingress: true
+ingress_port: 8100
+map:
+  - addon_config:rw
+panel_icon: mdi:server-network
+panel_title: MCP Host
+# One host port per hosted app (see apps.json in the add-on config dir). Point Cloudflare Tunnel
+# hostnames at these. 8100 is the status UI and is served via HA ingress only.
+ports:
+  8101/tcp: 8101
+  8102/tcp: 8102
+  8103/tcp: 8103
+  8104/tcp: 8104
+  8105/tcp: 8105
+options:
+  anthropic_api_key: ""
+  claude_model: claude-sonnet-5-5
+  notify_service: ""
+  auto_patch: true
+  max_patches_per_day: 3
+  github_token: ""
+  secrets: []
+schema:
+  anthropic_api_key: password?
+  claude_model: str
+  notify_service: str?
+  auto_patch: bool
+  max_patches_per_day: int(1,10)
+  github_token: password?
+  secrets:
+    - app: str
+      name: str
+      value: password

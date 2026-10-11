@@ -1,0 +1,18 @@
+{
+  "apps": [
+    {
+      "name": "example-app",
+      "description": "Any Node MCP server in a Git repo.",
+      "repo": "https://github.com/OWNER/REPO.git",
+      "ref": "main",
+      "install": "npm ci --ignore-scripts",
+      "build": "npm run build",
+      "start": "node dist/server.js",
+      "port": 8101,
+      "env": { "PORT": "8101" },
+      "requiredSecrets": ["API_TOKEN"],
+      "health": { "path": "/health" },
+      "mcp": { "path": "/mcp", "unauthenticatedStatusOk": [401] }
+    }
+  ]
+}
