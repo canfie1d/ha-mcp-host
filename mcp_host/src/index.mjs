@@ -26,6 +26,10 @@ options.supervisorToken = process.env.SUPERVISOR_TOKEN;
 delete process.env.SUPERVISOR_TOKEN;
 delete process.env.NODE_ENV;
 
+// One app's failure must never take the supervisor (and every other app) down.
+process.on('uncaughtException', (err) => log('supervisor', `uncaught: ${err.stack || err}`));
+process.on('unhandledRejection', (err) => log('supervisor', `unhandled rejection: ${err?.stack || err}`));
+
 const notify = (title, msg) => sendNotify(options, title, msg);
 // App definitions live in the add-on's private config dir, never in the repo.
 const APPS_FILE = process.env.MCPHOST_APPS_FILE || '/config/apps.json';

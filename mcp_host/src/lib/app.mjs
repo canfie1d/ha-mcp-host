@@ -46,8 +46,12 @@ export class ManagedApp {
 
   async sync() {
     if (!fileExists(path.join(this.repoDir, '.git'))) {
-      const r = await run(`git clone --branch ${this.def.ref} ${this.def.repo} ${this.repoDir}`);
-      if (r.code !== 0) throw new Error(`clone failed: ${r.output.slice(-500)}`);
+      const token = this.options.github_token;
+      const auth = token && /^https:\/\/github\.com\//.test(this.def.repo)
+        ? `-c http.extraheader="AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}" `
+        : '';
+      const r = await run(`git ${auth}clone --branch ${this.def.ref} ${this.def.repo} ${this.repoDir}`);
+      if (r.code !== 0) throw new Error(`clone failed: ${r.output.replaceAll(token || '\0', '***').slice(-500)}`);
     }
   }
 
@@ -64,6 +68,11 @@ export class ManagedApp {
 
   start() {
     this.stop();
+    if (!fileExists(this.repoDir)) {
+      this.detail = 'checkout missing; needs clone and build';
+      this.needsRebuild = true;
+      return;
+    }
     const out = createWriteStream(path.join(LOGS, `${this.name}.log`), { flags: 'a' });
     const child = spawn('sh', ['-c', `exec ${this.def.start}`], {
       cwd: this.repoDir,
@@ -76,6 +85,11 @@ export class ManagedApp {
     };
     child.stdout.on('data', sink);
     child.stderr.on('data', sink);
+    child.on('error', (err) => {
+      sink(`\n[supervisor] failed to spawn: ${err.message}\n`);
+      this.detail = `spawn failed: ${err.message}`;
+      if (this.child === child) this.child = null;
+    });
     child.on('exit', (code, sig) => {
       sink(`\n[supervisor] process exited code=${code} signal=${sig}\n`);
       if (this.child === child) this.child = null;
@@ -177,6 +191,13 @@ export class ManagedApp {
         return restart();
       };
 
+      if (!fileExists(path.join(this.repoDir, '.git'))) {
+        const ok = await outcome('clone + build', async () => {
+          await this.sync();
+          return rebuild(true);
+        });
+        if (ok) return;
+      }
       if (await outcome('restart', restart)) return;
       if (await outcome('clean reinstall + rebuild', () => rebuild(true))) return;
 
