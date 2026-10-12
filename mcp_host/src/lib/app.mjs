@@ -2,12 +2,13 @@ import { spawn } from 'node:child_process';
 import { createWriteStream } from 'node:fs';
 import path from 'node:path';
 import { DATA, LOGS, fileExists, incident, log, run, sleep } from './util.mjs';
-import { checkApp } from './health.mjs';
+import { checkApp, checkWarning } from './health.mjs';
 import { patchWithClaude } from './claude.mjs';
 
 const FAILS_BEFORE_HEAL = 3;
 const GIVE_UP_COOLDOWN_MS = 30 * 60_000;
 const STARTUP_WAIT_MS = 90_000;
+const WARN_RENOTIFY_MS = 12 * 60 * 60_000;
 
 export class ManagedApp {
   constructor(def, options, state, notify) {
@@ -28,6 +29,8 @@ export class ManagedApp {
     this.detail = '';
     this.healing = false;
     this.coolUntil = 0;
+    this.warning = '';
+    this.warnedAt = 0;
   }
 
   get name() {
@@ -154,6 +157,7 @@ export class ManagedApp {
       this.goodStreak++;
       if (this.status !== 'healthy') this.status = 'healthy';
       if (this.goodStreak === 2) await this.markGood();
+      await this.checkWarn(r.detail);
       return;
     }
 
@@ -161,6 +165,21 @@ export class ManagedApp {
     this.fails++;
     this.status = 'unhealthy';
     if (this.fails >= FAILS_BEFORE_HEAL) await this.heal(r.detail);
+  }
+
+  /** Notify-only condition: surfaced and announced, never healed. */
+  async checkWarn(okDetail) {
+    const warn = await checkWarning(this.def);
+    this.warning = warn || '';
+    if (!warn) {
+      this.warnedAt = 0;
+      return;
+    }
+    this.detail = `${okDetail}; NEEDS ATTENTION: ${warn}`;
+    if (Date.now() - this.warnedAt >= WARN_RENOTIFY_MS) {
+      this.warnedAt = Date.now();
+      await this.notify('MCP needs attention', `${this.name}: ${warn}`);
+    }
   }
 
   async markGood() {
@@ -323,6 +342,7 @@ export class ManagedApp {
       status: this.missing.length ? 'needs-secrets' : this.status,
       detail: this.missing.length ? `missing secrets: ${this.missing.join(', ')}` : this.detail,
       port: this.def.port,
+      warning: this.warning || null,
       lastGood: this.state.lastGood?.slice(0, 8) || null,
       patchesToday: this.state.patchDay === new Date().toISOString().slice(0, 10) ? this.state.patchCount : 0,
       logTail: this.tail.slice(-40),

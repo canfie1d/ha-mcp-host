@@ -6,6 +6,9 @@ A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
 
 - Clones each app listed in `apps.json`, builds it, runs it, and exposes it on its own port.
 - Every 30s runs a health check (HTTP path, then a real MCP `initialize` / `tools/list`).
+- An optional `health.warnPath` is a notify-only check: a 5xx there (e.g. an expired upstream
+  credential) sends a "needs attention" notification (re-sent every 12h) and flags the app, but
+  never starts the healing ladder, since restarts, rollbacks and patches cannot fix it.
 - After 3 consecutive failures it climbs a ladder, verifying health after each rung:
   1. restart
   2. clean reinstall + rebuild

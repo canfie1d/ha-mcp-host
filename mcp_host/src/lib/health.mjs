@@ -71,3 +71,26 @@ export async function checkApp(app, secrets) {
     return { ok: false, detail: `mcp handshake failed: ${err.message}` };
   }
 }
+
+/**
+ * Optional notify-only check (health.warnPath). A 5xx here means "needs a human"
+ * (e.g. an upstream credential expired) and must never trigger the healing ladder,
+ * which cannot fix it and would roll the app back. Returns a message or null.
+ */
+export async function checkWarning(app) {
+  const p = app.health.warnPath;
+  if (!p) return null;
+  try {
+    const res = await probe(`http://127.0.0.1:${app.port}${p}`);
+    if (res.status < 500) return null;
+    let detail = '';
+    try {
+      detail = String((await res.json()).detail || '');
+    } catch {
+      /* non-JSON body */
+    }
+    return detail || `${p} -> ${res.status}`;
+  } catch {
+    return null; // unreachable is the main check's concern
+  }
+}
