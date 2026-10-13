@@ -31,6 +31,7 @@ export class ManagedApp {
     this.coolUntil = 0;
     this.warning = '';
     this.warnedAt = 0;
+    this.retired = false; // set when removed/replaced via the apps editor; must never start again
   }
 
   get name() {
@@ -85,6 +86,7 @@ export class ManagedApp {
 
   start() {
     this.stop();
+    if (this.retired) return;
     if (!fileExists(this.repoDir)) {
       this.detail = 'checkout missing; needs clone and build';
       this.needsRebuild = true;
@@ -147,7 +149,7 @@ export class ManagedApp {
 
   /** Called every interval by the main loop. */
   async tick() {
-    if (this.healing || this.missing.length) return;
+    if (this.retired || this.healing || this.missing.length) return;
     if (Date.now() < this.coolUntil) return;
 
     const r = await this.check();

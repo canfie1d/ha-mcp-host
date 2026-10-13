@@ -20,6 +20,10 @@ A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
   pushed to an `auto-fix/<timestamp>` branch for you to review and merge. Capped by
   `max_patches_per_day`.
 - Status page appears in the HA sidebar ("MCP Host"); `status.json` has the raw data.
+- **Edit apps.json in the UI**: the status page links to an editor (`/apps`). Save validates the file,
+  keeps the previous one as `apps.json.bak`, and applies it live: new and edited apps are rebuilt and
+  restarted, removed apps are stopped, untouched apps keep running. Use Validate for a dry run that
+  shows what would change. The editor is only reachable through HA ingress (admin users).
 
 ## Install
 
@@ -32,7 +36,7 @@ A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
      under `requiredSecrets`; the UI shows `needs-secrets` until all are present)
 5. Define your apps. App definitions are **not** in this repo. On first start the add-on creates an
    empty `apps.json` in its private config dir (`/addon_configs/<id>_mcp_host/apps.json`, visible via
-   Samba or the File editor add-on). Fill it in using `apps.example.json` as the template, then restart.
+   Samba or the File editor add-on). Fill it in through the editor in the status page (or by hand using `apps.example.json` as the template).
 6. Start it. First boot builds each app, so allow a few minutes.
 
 ## Expose it
@@ -51,8 +55,9 @@ Some hosts never reveal secret values; re-enter them from your password manager 
 
 ## Adding another MCP
 
-Append an entry to your `apps.json` (repo, install, build, start, port, health, requiredSecrets),
-add a port in `config.yaml` if it's past 8105, and rebuild the add-on.
+Use "Add app template" in the editor (or append an entry to `apps.json` by hand), then Save & apply.
+Add the app's secrets in the add-on Configuration. A port past 8105 also needs adding to `config.yaml`
+and an add-on rebuild; ports are published by HA, not by the editor.
 
 ## Known limitations
 

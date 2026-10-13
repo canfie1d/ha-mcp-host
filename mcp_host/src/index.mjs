@@ -1,10 +1,12 @@
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync, copyFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DATA, log, readJson, recentIncidents, sleep, writeJson } from './lib/util.mjs';
 import { ManagedApp } from './lib/app.mjs';
 import { notify as sendNotify } from './lib/notify.mjs';
+import { planChanges, validateAppsConfig } from './lib/appsconfig.mjs';
+import { BASE_CSS, editorPage } from './lib/editor.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CHECK_INTERVAL_MS = Number(process.env.MCPHOST_INTERVAL_MS) || 30_000;
@@ -41,7 +43,86 @@ if (!existsSync(APPS_FILE)) {
 const defs = readJson(APPS_FILE, { apps: [] }).apps;
 const stateFile = path.join(DATA, 'state.json');
 const state = readJson(stateFile, {});
-const apps = defs.map((d) => new ManagedApp(d, options, (state[d.name] ||= {}), notify));
+const makeApp = (d) => new ManagedApp(d, options, (state[d.name] ||= {}), notify);
+let apps = defs.map(makeApp);
+
+/**
+ * Apply a new, already-validated list of definitions to the running set without a restart.
+ * Unchanged apps keep running; changed apps are stopped and rebuilt; removed apps are stopped.
+ * Builds happen in the background so the caller gets the plan immediately.
+ */
+function applyDefs(newDefs) {
+  const plan = planChanges(apps.map((a) => a.def), newDefs);
+  const existing = new Map(apps.map((a) => [a.name, a]));
+  const fresh = [];
+  for (const name of [...plan.removed, ...plan.changed]) {
+    const old = existing.get(name);
+    const newDef = newDefs.find((d) => d.name === name);
+    old.retired = true;
+    old.stop();
+    // Last-known-good commit is meaningless against a different repo.
+    if (!newDef || newDef.repo !== old.def.repo) delete state[name];
+    if (!newDef) existing.delete(name);
+  }
+  apps = newDefs.map((d) => {
+    if (plan.unchanged.includes(d.name)) return existing.get(d.name);
+    const app = makeApp(d);
+    fresh.push(app);
+    return app;
+  });
+  writeJson(stateFile, state);
+  log('supervisor', `apps reloaded: +${plan.added.length} ~${plan.changed.length} -${plan.removed.length}`);
+  (async () => {
+    if (plan.changed.length) await sleep(3000); // let old processes release their ports
+    await Promise.all(fresh.map(bootstrap));
+  })().catch((err) => log('supervisor', `reload bootstrap error: ${err.message}`));
+  return plan;
+}
+
+function persistApps(cfg) {
+  const text = JSON.stringify(cfg, null, 2) + '\n';
+  if (existsSync(APPS_FILE)) copyFileSync(APPS_FILE, `${APPS_FILE}.bak`);
+  const tmp = `${APPS_FILE}.tmp`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, APPS_FILE);
+  return text;
+}
+
+// Saves are serialized so two quick clicks cannot interleave file and process changes.
+let saving = Promise.resolve();
+function saveApps(text, dryRun) {
+  const job = saving.then(() => {
+    let cfg;
+    try {
+      cfg = JSON.parse(text);
+    } catch (err) {
+      return { status: 400, body: { ok: false, errors: [`Invalid JSON: ${err.message}`] } };
+    }
+    const errors = validateAppsConfig(cfg);
+    if (errors.length) return { status: 400, body: { ok: false, errors } };
+    if (dryRun) return { status: 200, body: { ok: true, plan: planChanges(apps.map((a) => a.def), cfg.apps) } };
+    const saved = persistApps(cfg);
+    return { status: 200, body: { ok: true, text: saved, plan: applyDefs(cfg.apps) } };
+  });
+  saving = job.catch(() => {});
+  return job;
+}
+
+function readBody(req, limit = 256 * 1024) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error('request body too large'));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
 
 async function bootstrap(app) {
   if (app.missing.length) {
@@ -83,31 +164,47 @@ function page() {
   return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>MCP Host</title>
 <meta http-equiv=refresh content=30>
-<style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#1f2328;--muted:#656d76;--line:#d0d7de;--ok:#1a7f37;--bad:#cf222e;--warn:#9a6700}
-@media (prefers-color-scheme:dark){:root{--bg:#161b22;--fg:#e6edf3;--muted:#9198a1;--line:#30363d;--ok:#3fb950;--bad:#f85149;--warn:#d29922}}
-html,body{background:var(--bg);color:var(--fg)}
-body{font:15px/1.45 system-ui,-apple-system,sans-serif;margin:0;padding:16px;max-width:900px}
-h2,h3{margin:0 0 12px}h3{margin-top:24px}
-table{border-collapse:collapse;width:100%}
-th,td{padding:8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:13px}
-td:last-child{color:var(--muted);word-break:break-word}
-.healthy{color:var(--ok)}.unhealthy,.failed{color:var(--bad)}.healing,.starting,.needs-secrets{color:var(--warn)}
-td.healthy,td.unhealthy,td.failed,td.healing,td.starting,td.needs-secrets{font-weight:600;white-space:nowrap}
-</style>
+<style>${BASE_CSS}</style>
+<nav><a href="apps">Edit apps.json</a></nav>
 <h2>MCP Host</h2>
 <table><tr><th>App</th><th>Status</th><th>Port</th><th>Last good</th><th>Patches today</th><th>Detail</th></tr>${rows}</table>
 <h3>Recent incidents</h3><ul>${inc || '<li>None</li>'}</ul>`;
 }
 
-createServer((req, res) => {
-  if (req.url?.endsWith('/status.json')) {
-    res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ apps: apps.map((a) => a.snapshot()), incidents: recentIncidents(50) }));
-  } else {
-    res.writeHead(200, { 'content-type': 'text/html' });
-    res.end(page());
+const send = (res, status, type, body) => {
+  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
+  res.end(body);
+};
+const sendJson = (res, status, obj) => send(res, status, 'application/json', JSON.stringify(obj));
+
+createServer(async (req, res) => {
+  try {
+    const route = new URL(req.url || '/', 'http://x').pathname.replace(/\/+$/, '');
+    const query = new URL(req.url || '/', 'http://x').searchParams;
+    if (route.endsWith('/status.json')) {
+      return sendJson(res, 200, { apps: apps.map((a) => a.snapshot()), incidents: recentIncidents(50) });
+    }
+    if (route.endsWith('/api/apps')) {
+      if (req.method === 'GET') {
+        const text = existsSync(APPS_FILE) ? readFileSync(APPS_FILE, 'utf8') : '{ "apps": [] }\n';
+        return sendJson(res, 200, { text });
+      }
+      if (req.method === 'PUT') {
+        if (!String(req.headers['content-type'] || '').startsWith('application/json')) {
+          return sendJson(res, 415, { ok: false, errors: ['content-type must be application/json'] });
+        }
+        const body = JSON.parse((await readBody(req)) || '{}');
+        if (typeof body.text !== 'string') return sendJson(res, 400, { ok: false, errors: ['"text" is required'] });
+        const out = await saveApps(body.text, query.get('dryRun') === '1');
+        return sendJson(res, out.status, out.body);
+      }
+      return sendJson(res, 405, { ok: false, errors: ['method not allowed'] });
+    }
+    if (route.endsWith('/apps')) return send(res, 200, 'text/html', editorPage());
+    return send(res, 200, 'text/html', page());
+  } catch (err) {
+    log('supervisor', `http error: ${err.stack || err}`);
+    sendJson(res, 500, { ok: false, errors: [err.message] });
   }
 }).listen(STATUS_PORT, '0.0.0.0');
 
