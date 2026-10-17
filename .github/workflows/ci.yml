@@ -6,7 +6,7 @@ on:
     branches:
       - main
     paths-ignore:
-      - mcp_host/config.yaml
+      - config.yaml
 
 jobs:
   build:
@@ -20,4 +20,4 @@ jobs:
           node-version: 22
 
       - name: Build
-        run: find mcp_host/src -name '*.mjs' -print0 | xargs -0 -n1 node --check
+        run: find src -name '*.mjs' -print0 | xargs -0 -n1 node --check
