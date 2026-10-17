@@ -7,7 +7,7 @@ add-on's private config dir.
 Install: HA → Settings → Add-ons → Add-on Store → ⋮ → Repositories → add
 `https://github.com/canfie1d/mcp-host`.
 
-See [mcp_host/README.md](mcp_host/README.md) for configuration and cutover steps.
+See [README.md](README.md) for configuration and cutover steps.
 
 A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
 
@@ -54,20 +54,11 @@ Use the **Cloudflare Tunnel** add-on (or Tailscale Funnel) and map one hostname 
 `http://<ha-host>:810x` (ports from `apps.json`). Then set each app's `PUBLIC_URL` secret to
 its new public URL.
 
-## Cutting over from another host (per app)
-
-1. Run it here in parallel; confirm status is `healthy` and the MCP connects through the new URL.
-2. Update the connector URL in Claude (and any OAuth redirect / Clerk allowed origin).
-3. Watch for a day, then scale down the old deployment; delete it after a week.
-
-Some hosts never reveal secret values; re-enter them from your password manager / `.env` files.
-
 ## Adding another MCP
 
 Use "Add app template" in the editor (or append an entry to `apps.json` by hand), then Save & apply.
-Add the app's secrets in the add-on Configuration. A port past 8105 also needs adding to `config.yaml`
-and an add-on rebuild; ports are published by HA, not by the editor.
-
+Add the app's secrets in the add-on Configuration. A port also needs adding to `config.yaml`
+and an add-on rebuild.
 ## Known limitations
 
 - Child processes share the add-on container; there is no per-app resource limit.
