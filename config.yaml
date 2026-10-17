@@ -1,5 +1,5 @@
 name: MCP Host
-version: "0.3.0"
+version: "1.0.1"
 slug: mcp_host
 description: Hosts your MCP servers and automatically heals them when they break
 arch:
@@ -23,6 +23,7 @@ ports:
   8103/tcp: 8103
   8104/tcp: 8104
   8105/tcp: 8105
+image: ghcr.io/canfie1d/{arch}-addon-mcp-host
 options:
   anthropic_api_key: ""
   claude_model: claude-sonnet-5-5

@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - mcp_host/config.yaml
+
+jobs:
+  build:
+    name: Build server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build
+        run: find mcp_host/src -name '*.mjs' -print0 | xargs -0 -n1 node --check
