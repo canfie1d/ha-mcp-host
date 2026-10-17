@@ -1,4 +1,4 @@
-# mcp-host
+# ha-mcp-host
 
 Home Assistant add-on repository. Contains one add-on, **MCP Host** (`mcp_host/`), which hosts,
 health-checks and self-heals MCP servers. It ships with no app definitions; those live in the
