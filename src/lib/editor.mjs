@@ -79,8 +79,9 @@ export function statusPage(snaps, incidents) {
 <title>MCP Host</title>
 <meta http-equiv="refresh" content="30">
 <style>${BASE_CSS}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
-.card{border:1px solid var(--line);border-radius:10px;background:var(--card);box-shadow:var(--shadow);padding:14px 16px 12px;min-width:0}
+body.status{max-width:860px;margin:0 auto;padding:24px 16px 40px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--card);box-shadow:var(--shadow);padding:16px;min-width:0}
 .card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .card-top h2{word-break:break-word}
 .pill{flex:none;font-size:12px;font-weight:650;line-height:1.5;padding:0 8px;border:1px solid currentColor;border-radius:999px}
@@ -95,9 +96,10 @@ dd.mono{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
 .detail{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .detail.warn,.card.needs-secrets .detail,.card.healing .detail,.card.starting .detail{color:var(--warn)}
 .card.unhealthy .detail,.card.failed .detail{color:var(--bad)}
-.panel{margin-top:22px}
-.panel h2{margin-bottom:4px}
+.section-title{margin:28px 0 10px}
+.panel{margin-top:0;border-radius:14px;padding:16px}
 .panel.empty p,.empty-inc{margin:8px 0 2px}
+.panel p{margin:0}
 .incidents{list-style:none;margin:8px 0 0;padding:0}
 .incidents li{padding:10px 0;border-top:1px solid var(--line)}
 .incidents time{display:block;color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
@@ -105,16 +107,19 @@ dd.mono{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
 .inc-fail{color:var(--muted)}
 </style>
 <body class="status">
-<header class="top"><div><h1>MCP Host</h1><p class="overall">${esc(overallLine(snaps))}</p></div><a class="btn" href="apps">Edit apps.json</a></header>
+<header class="top"><div><h1>MCP Host</h1><p class="overall">${esc(overallLine(snaps))}</p></div></header>
 ${cards}
-<section class="panel"><h2>Recent incidents</h2>${items}</section>`;
+<h2 class="section-title">Recent incidents</h2>
+<section class="panel">${items}</section>
+<h2 class="section-title">Apps</h2>
+<section class="panel"><p class="hint">Edit the app definitions, validate, and apply changes live.</p><p style="margin-top:10px"><a class="btn" href="apps">Edit apps.json</a></p></section>`;
 }
 
 export function editorPage() {
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">
 <title>MCP Host - Apps</title>
 <style>${BASE_CSS}
-body.editor{max-width:960px}
+body.editor{max-width:860px;margin:0 auto;padding:24px 16px 40px}
 textarea{width:100%;box-sizing:border-box;min-height:55vh;font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--field);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:12px;tab-size:2;resize:vertical}
 .bar{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
 #msg{margin-top:4px}
