@@ -6,7 +6,7 @@ import { DATA, log, readJson, recentIncidents, sleep, writeJson } from './lib/ut
 import { ManagedApp } from './lib/app.mjs';
 import { notify as sendNotify } from './lib/notify.mjs';
 import { planChanges, validateAppsConfig } from './lib/appsconfig.mjs';
-import { BASE_CSS, editorPage } from './lib/editor.mjs';
+import { editorPage, statusPage } from './lib/editor.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CHECK_INTERVAL_MS = Number(process.env.MCPHOST_INTERVAL_MS) || 30_000;
@@ -151,24 +151,8 @@ async function bootstrap(app) {
 }
 
 function page() {
-  const rows = apps
-    .map((a) => a.snapshot())
-    .map(
-      (s) =>
-        `<tr><td>${s.name}</td><td class="${s.status}">${s.status}</td><td>${s.port}</td><td>${s.lastGood ?? '-'}</td><td>${s.patchesToday}</td><td>${s.detail}</td></tr>`,
-    )
-    .join('');
-  const inc = recentIncidents(15)
-    .map((i) => `<li><b>${i.at}</b> ${i.app}: ${i.resolvedBy ?? 'UNRESOLVED'} — ${i.failure ?? ''}</li>`)
-    .join('');
-  return `<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
-<title>MCP Host</title>
-<meta http-equiv=refresh content=30>
-<style>${BASE_CSS}</style>
-<nav><a href="apps">Edit apps.json</a></nav>
-<h2>MCP Host</h2>
-<table><tr><th>App</th><th>Status</th><th>Port</th><th>Last good</th><th>Patches today</th><th>Detail</th></tr>${rows}</table>
-<h3>Recent incidents</h3><ul>${inc || '<li>None</li>'}</ul>`;
+  const snaps = apps.map((a) => ({ ...a.snapshot(), description: a.def.description || '' }));
+  return statusPage(snaps, recentIncidents(15));
 }
 
 const send = (res, status, type, body) => {
