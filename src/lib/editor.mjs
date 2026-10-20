@@ -67,7 +67,11 @@ function incidentItem(i) {
   return `<li><time datetime="${esc(i.at)}">${esc(i.at)}</time><div class="inc-main"><b>${esc(i.app)}</b> ${esc(i.resolvedBy || 'unresolved')}<span class="inc-fail">${failure}</span></div></li>`;
 }
 
-export function statusPage(snaps, incidents) {
+function settingsLink(settingsUrl) {
+  return settingsUrl ? `<a class="btn" href="${esc(settingsUrl)}" target="_top">App settings</a>` : '';
+}
+
+export function statusPage(snaps, incidents, settingsUrl = null) {
   const described = snaps.some((s) => s.description) ? ' has-desc' : '';
   const cards = snaps.length
     ? `<div class="grid${described}">${snaps.map(card).join('')}</div>`
@@ -107,7 +111,7 @@ dd.mono{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
 .inc-fail{color:var(--muted)}
 </style>
 <body class="status">
-<header class="top"><div><h1>MCP Host</h1><p class="overall">${esc(overallLine(snaps))}</p></div></header>
+<header class="top"><div><h1>MCP Host</h1><p class="overall">${esc(overallLine(snaps))}</p></div>${settingsLink(settingsUrl)}</header>
 ${cards}
 <h2 class="section-title">Recent incidents</h2>
 <section class="panel">${items}</section>
@@ -115,7 +119,7 @@ ${cards}
 <section class="panel"><p class="hint">Edit the app definitions, validate, and apply changes live.</p><p style="margin-top:10px"><a class="btn" href="apps">Edit apps.json</a></p></section>`;
 }
 
-export function editorPage() {
+export function editorPage(settingsUrl = null) {
   return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light">
 <title>MCP Host - Apps</title>
 <style>${BASE_CSS}
@@ -128,7 +132,7 @@ textarea{width:100%;box-sizing:border-box;min-height:55vh;font:13px/1.5 ui-monos
 .lead{margin:0 0 14px}
 </style>
 <body class="editor">
-<header class="top"><div><h1>Apps</h1><p class="overall"><a href="./">Status</a></p></div></header>
+<header class="top"><div><h1>Apps</h1><p class="overall"><a href="./">Status</a></p></div>${settingsLink(settingsUrl)}</header>
 <p class="hint lead">Edits <code>apps.json</code> in the add-on config dir. Saving validates, keeps the previous file as <code>apps.json.bak</code>, and applies the change live: new and edited apps are rebuilt and restarted, removed apps are stopped, untouched apps keep running. Secrets are managed in the add-on Configuration; host ports must be published in the add-on's network settings.</p>
 <textarea id=ed spellcheck=false autocomplete=off></textarea>
 <div class=bar>

@@ -150,9 +150,25 @@ async function bootstrap(app) {
   }
 }
 
-function page() {
+// Link to this add-on's Settings > Apps > Configuration page. The slug carries a repository
+// hash, so it is read from the Supervisor instead of hard-coded. No link is shown if the lookup fails.
+let settingsUrl = null;
+async function resolveSettingsUrl() {
+  if (settingsUrl || !options.supervisorToken) return settingsUrl;
+  try {
+    const r = await fetch('http://supervisor/addons/self/info', {
+      headers: { authorization: `Bearer ${options.supervisorToken}` },
+      signal: AbortSignal.timeout(3000),
+    });
+    const slug = r.ok ? (await r.json())?.data?.slug : null;
+    if (slug) settingsUrl = `/config/app/${slug}/config`;
+  } catch {}
+  return settingsUrl;
+}
+
+async function page() {
   const snaps = apps.map((a) => ({ ...a.snapshot(), description: a.def.description || '' }));
-  return statusPage(snaps, recentIncidents(15));
+  return statusPage(snaps, recentIncidents(15), await resolveSettingsUrl());
 }
 
 const send = (res, status, type, body) => {
@@ -184,8 +200,8 @@ createServer(async (req, res) => {
       }
       return sendJson(res, 405, { ok: false, errors: ['method not allowed'] });
     }
-    if (route.endsWith('/apps')) return send(res, 200, 'text/html', editorPage());
-    return send(res, 200, 'text/html', page());
+    if (route.endsWith('/apps')) return send(res, 200, 'text/html', editorPage(await resolveSettingsUrl()));
+    return send(res, 200, 'text/html', await page());
   } catch (err) {
     log('supervisor', `http error: ${err.stack || err}`);
     sendJson(res, 500, { ok: false, errors: [err.message] });
