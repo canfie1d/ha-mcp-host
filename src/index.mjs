@@ -22,6 +22,8 @@ const options = {
   secrets: [],
   ...readJson(path.join(DATA, 'options.json'), {}),
 };
+// Dev override: load via `node --env-file=.env` so the key stays scoped to this project.
+if (process.env.ANTHROPIC_API_KEY) options.anthropic_api_key = process.env.ANTHROPIC_API_KEY;
 options.supervisorToken = process.env.SUPERVISOR_TOKEN;
 
 // Children must not inherit the supervisor's own credentials or build mode.
