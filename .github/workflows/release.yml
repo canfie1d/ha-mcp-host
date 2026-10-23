@@ -6,6 +6,7 @@ on:
       - main
     paths-ignore:
       - config.yaml
+      - CHANGELOG.md
   workflow_dispatch:
 
 permissions:
@@ -23,6 +24,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the changelog needs history back to the previous release
 
       - name: Version
         id: version
@@ -66,8 +69,15 @@ jobs:
         run: |
           version="${{ steps.version.outputs.value }}"
           sed -i "s/^version: .*/version: \"${version}\"/" config.yaml
+          # HA shows CHANGELOG.md on the update screen. List every commit since the previous
+          # release commit, newest first, under the new version.
+          prev=$(git log --format=%H -n1 --extended-regexp --grep='^Release [0-9]+\.[0-9]+\.[0-9]+$')
+          notes=$(git log --no-merges --format='- %s' ${prev:+$prev..}HEAD | grep -vE '^- Release [0-9]' || true)
+          [ -n "$notes" ] || notes="- Rebuilt with no code changes."
+          { printf '# Changelog\n\n## %s\n\n%s\n\n' "$version" "$notes"; sed '1,2d' CHANGELOG.md; } > CHANGELOG.new
+          mv CHANGELOG.new CHANGELOG.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add config.yaml
+          git add config.yaml CHANGELOG.md
           git commit -m "Release ${version}"
           git push origin HEAD:main
