@@ -297,7 +297,7 @@ createServer(async (req, res) => {
         return sendJson(res, out.status, out.body);
       }
       if (app.missing.length) return sendJson(res, 409, { ok: false, errors: [`missing secrets: ${app.missing.join(', ')}`] });
-      if (!runAction(app, op, ACTIONS[op])) return sendJson(res, 409, { ok: false, errors: [`busy: ${app.busy || 'healing'}`] });
+      if (!runAction(app, op, () => ACTIONS[op](app))) return sendJson(res, 409, { ok: false, errors: [`busy: ${app.busy || 'healing'}`] });
       return sendJson(res, 202, { ok: true });
     }
     const page = /\/app\/([^/]+)$/.exec(route);

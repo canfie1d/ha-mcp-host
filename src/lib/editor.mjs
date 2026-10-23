@@ -183,6 +183,7 @@ const APP_CSS = `
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:2px 24px;margin:0}
 .facts div{display:grid;grid-template-columns:7rem minmax(0,1fr);gap:8px;padding:6px 0;border-top:1px solid var(--line);font-size:13.5px}
 .facts dt{color:var(--muted)}.facts dd{margin:0;overflow-wrap:anywhere}
+.facts .warn{color:var(--warn)}
 .mono{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
 .sub{display:block;color:var(--muted);font-size:12.5px}
 .secrets{width:100%;border-collapse:collapse}
@@ -211,6 +212,13 @@ export function appPage(app, layout) {
   const commit = v
     ? `<span class="mono">${esc(v.sha.slice(0, 8))}</span><span class="sub">${esc(v.subject)}</span><span class="sub">${esc(v.date)}</span>`
     : '<span class="hint">not checked out yet</span>';
+  const upstream = !v || v.ahead === null
+    ? '—'
+    : v.ahead
+      ? `<span class="warn">${esc(v.ahead)} local commit(s) not on ${esc(app.ref)}${v.behind ? `, ${esc(v.behind)} behind` : ''}</span><span class="sub">Usually an auto-fix patch. Pull &amp; rebuild will not fast-forward until the checkout matches ${esc(app.ref)}.</span>`
+      : v.behind
+        ? `<span class="warn">${esc(v.behind)} commit(s) behind ${esc(app.ref)}</span>`
+        : `up to date with ${esc(app.ref)}`;
   return shell({
     title: `${app.name} · MCP Host`,
     css: APP_CSS,
@@ -225,7 +233,8 @@ ${app.description ? `<p class="lede">${esc(app.description)}</p>` : ''}
 
 <h2 class="section-title">Deployed</h2>
 <section class="panel"><dl class="facts">
-<div><dt>Version</dt><dd>${esc(v?.pkg || '—')}</dd></div>
+<div><dt>Version</dt><dd>${esc(v?.tag || v?.pkg || '—')}</dd></div>
+<div><dt>Upstream</dt><dd>${upstream}</dd></div>
 <div><dt>Commit</dt><dd>${commit}</dd></div>
 <div><dt>Last good</dt><dd class="mono">${esc(app.lastGood || '—')}</dd></div>
 <div><dt>Repo</dt><dd>${repoLink} <span class="sub">${esc(app.ref)}</span></dd></div>
