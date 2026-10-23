@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11
+
+- Update checkouts that the build left with modified tracked files (#8)
+
 ## 1.0.10
 
 - Add a changelog for the HA update screen (#7)
