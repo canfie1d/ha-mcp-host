@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.10
+
+- Add a changelog for the HA update screen (#7)
+
 ## 1.0.9
 
 - Fix the Restart and Pull & rebuild buttons, which failed with "Cannot read properties of undefined (reading 'missing')".
