@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { DATA, LOGS, fileExists, incident, log, run, sleep } from './util.mjs';
 import { checkApp, checkWarning } from './health.mjs';
@@ -11,16 +11,13 @@ const STARTUP_WAIT_MS = 90_000;
 const WARN_RENOTIFY_MS = 12 * 60 * 60_000;
 
 export class ManagedApp {
-  constructor(def, options, state, notify) {
+  constructor(def, options, state, notify, secrets = {}) {
     this.def = def;
     this.options = options;
     this.state = state; // persisted per-app record, mutated in place
     this.notify = notify;
     this.repoDir = path.join(DATA, 'apps', def.name);
-    this.secrets = Object.fromEntries(
-      options.secrets.filter((s) => s.app === def.name).map((s) => [s.name, s.value]),
-    );
-    this.missing = (def.requiredSecrets || []).filter((n) => !this.secrets[n]);
+    this.setSecrets(secrets);
     this.child = null;
     this.tail = [];
     this.fails = 0;
@@ -32,6 +29,12 @@ export class ManagedApp {
     this.warning = '';
     this.warnedAt = 0;
     this.retired = false; // set when removed/replaced via the apps editor; must never start again
+    this.busy = ''; // name of a manual action (restart, rebuild) in progress; pauses health ticks
+  }
+
+  setSecrets(secrets) {
+    this.secrets = { ...secrets };
+    this.missing = (this.def.requiredSecrets || []).filter((n) => !this.secrets[n]);
   }
 
   get name() {
@@ -128,6 +131,19 @@ export class ManagedApp {
     return (await run('git rev-parse HEAD', { cwd: this.repoDir })).output.trim();
   }
 
+  /** What is checked out: commit, its subject and date, and the package.json version if any. */
+  async version() {
+    if (!fileExists(path.join(this.repoDir, '.git'))) return null;
+    const r = await run('git log -1 --format=%H%x00%s%x00%cI', { cwd: this.repoDir });
+    if (r.code !== 0) return null;
+    const [sha, subject, date] = r.output.trim().split('\0');
+    let pkg = null;
+    try {
+      pkg = JSON.parse(readFileSync(path.join(this.repoDir, 'package.json'), 'utf8')).version || null;
+    } catch {}
+    return { sha, subject, date, pkg };
+  }
+
   // ---- health ----------------------------------------------------------
 
   async check() {
@@ -149,7 +165,7 @@ export class ManagedApp {
 
   /** Called every interval by the main loop. */
   async tick() {
-    if (this.retired || this.healing || this.missing.length) return;
+    if (this.retired || this.healing || this.busy || this.missing.length) return;
     if (Date.now() < this.coolUntil) return;
 
     const r = await this.check();
@@ -341,7 +357,7 @@ export class ManagedApp {
   snapshot() {
     return {
       name: this.name,
-      status: this.missing.length ? 'needs-secrets' : this.status,
+      status: this.missing.length ? 'needs-secrets' : this.busy ? 'starting' : this.status,
       detail: this.missing.length ? `missing secrets: ${this.missing.join(', ')}` : this.detail,
       port: this.def.port,
       warning: this.warning || null,

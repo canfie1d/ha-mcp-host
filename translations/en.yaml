@@ -1,0 +1,22 @@
+configuration:
+  anthropic_api_key:
+    name: Anthropic API key
+    description: Lets Claude diagnose and patch an app after restart, reinstall and rollback have all failed.
+  claude_model:
+    name: Claude model
+    description: Model used for automatic patches.
+  notify_service:
+    name: Notify service
+    description: HA notify service for heal and outage alerts, e.g. notify.mobile_app_your_phone.
+  auto_patch:
+    name: Automatic patches
+    description: Allow Claude to edit an app's code when nothing else brings it back.
+  max_patches_per_day:
+    name: Patches per day
+    description: Per-app daily limit on Claude patch attempts.
+  github_token:
+    name: GitHub token
+    description: Used to clone private repos and push auto-fix branches.
+  secrets:
+    name: Secrets (deprecated)
+    description: No longer read. Set each app's secrets on its page in the MCP Host panel. Existing entries were imported once and can be deleted.
