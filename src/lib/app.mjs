@@ -72,6 +72,9 @@ export class ManagedApp {
     const before = await this.head();
     const m = await run('git merge --ff-only FETCH_HEAD', { cwd: this.repoDir });
     const after = await this.head();
+    // Release tags give the app page a real version. Best effort, and only after the merge,
+    // since this fetch replaces FETCH_HEAD.
+    await run(`git ${auth}fetch --force origin "+refs/tags/*:refs/tags/*"`, { cwd: this.repoDir });
     if (m.code !== 0) log(this.name, 'checkout has local commits; not fast-forwarding');
     else if (after !== before) log(this.name, `updated ${before.slice(0, 8)} -> ${after.slice(0, 8)}`);
   }
@@ -131,17 +134,25 @@ export class ManagedApp {
     return (await run('git rev-parse HEAD', { cwd: this.repoDir })).output.trim();
   }
 
-  /** What is checked out: commit, its subject and date, and the package.json version if any. */
+  /**
+   * What is checked out: commit, its subject and date, the nearest release tag (or the
+   * package.json version when the repo has no tags), and how far it is from the upstream ref.
+   */
   async version() {
     if (!fileExists(path.join(this.repoDir, '.git'))) return null;
-    const r = await run('git log -1 --format=%H%x00%s%x00%cI', { cwd: this.repoDir });
+    const opts = { cwd: this.repoDir };
+    const r = await run('git log -1 --format=%H%x00%s%x00%cI', opts);
     if (r.code !== 0) return null;
     const [sha, subject, date] = r.output.trim().split('\0');
+    const tag = await run('git describe --tags', opts);
     let pkg = null;
     try {
       pkg = JSON.parse(readFileSync(path.join(this.repoDir, 'package.json'), 'utf8')).version || null;
     } catch {}
-    return { sha, subject, date, pkg };
+    // "<local-only commits>\t<upstream commits not yet pulled>", as of the last fetch.
+    const lr = await run(`git rev-list --left-right --count HEAD...origin/${this.def.ref}`, opts);
+    const [ahead, behind] = lr.code === 0 ? lr.output.trim().split(/\s+/).map(Number) : [null, null];
+    return { sha, subject, date, tag: tag.code === 0 ? tag.output.trim() : null, pkg, ahead, behind };
   }
 
   // ---- health ----------------------------------------------------------
