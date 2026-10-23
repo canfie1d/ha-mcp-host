@@ -70,7 +70,14 @@ export class ManagedApp {
       return;
     }
     const before = await this.head();
-    const m = await run('git merge --ff-only FETCH_HEAD', { cwd: this.repoDir });
+    // Uncommitted edits to tracked files are always disposable here: builds regenerate committed
+    // files (e.g. a TanStack routeTree.gen.ts) and an unkept Claude patch is reset. They would
+    // block a merge, so with no local commits the checkout is moved to upstream outright.
+    // Untracked and ignored files (build output, local data) are left alone.
+    const ff = await run('git merge-base --is-ancestor HEAD FETCH_HEAD', { cwd: this.repoDir });
+    const m = ff.code === 0
+      ? await run('git reset --hard FETCH_HEAD', { cwd: this.repoDir })
+      : { code: 1 };
     const after = await this.head();
     // Release tags give the app page a real version. Best effort, and only after the merge,
     // since this fetch replaces FETCH_HEAD.

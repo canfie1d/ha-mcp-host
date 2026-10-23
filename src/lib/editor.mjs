@@ -233,7 +233,7 @@ ${app.description ? `<p class="lede">${esc(app.description)}</p>` : ''}
 
 <h2 class="section-title">Deployed</h2>
 <section class="panel"><dl class="facts">
-<div><dt>Version</dt><dd>${esc(v?.tag || v?.pkg || '—')}</dd></div>
+<div><dt>Version</dt><dd>${v?.tag ? esc(v.tag) : v?.pkg ? `${esc(v.pkg)}<span class="sub">from package.json; no release tag in this commit's history</span>` : '—'}</dd></div>
 <div><dt>Upstream</dt><dd>${upstream}</dd></div>
 <div><dt>Commit</dt><dd>${commit}</dd></div>
 <div><dt>Last good</dt><dd class="mono">${esc(app.lastGood || '—')}</dd></div>
