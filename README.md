@@ -28,7 +28,9 @@ A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
   if the app comes back healthy. Kept patches are committed locally and, with a `github_token`,
   pushed to an `auto-fix/<timestamp>` branch for you to review and merge. Capped by
   `max_patches_per_day`.
-- Status page appears in the HA sidebar ("MCP Host"); `status.json` has the raw data.
+- The "MCP Host" panel in the HA sidebar has its own side nav: an overview of every app, then one
+  page per app with its status, deployed version and commit, secrets, live logs, incidents, and
+  Restart / Pull & rebuild buttons. `status.json` has the raw data.
 - **Edit apps.json in the UI**: the status page links to an editor (`/apps`). Save validates the file,
   keeps the previous one as `apps.json.bak`, and applies it live: new and edited apps are rebuilt and
   restarted, removed apps are stopped, untouched apps keep running. Use Validate for a dry run that
@@ -41,12 +43,16 @@ A Home Assistant OS add-on that hosts MCP servers and keeps them healthy.
 3. Settings > Add-ons > Add-on Store > ⋮ > Check for updates. "MCP Host" appears under Local add-ons.
 4. Install, then open Configuration and fill in:
    - `anthropic_api_key`, `notify_service` (e.g. `notify.mobile_app_your_phone`)
-   - `secrets`: one row per `app` / `name` / `value` (the names each app needs are in `apps.json`
-     under `requiredSecrets`; the UI shows `needs-secrets` until all are present)
 5. Define your apps. App definitions are **not** in this repo. On first start the add-on creates an
    empty `apps.json` in its private config dir (`/addon_configs/<id>_mcp_host/apps.json`, visible via
    Samba or the File editor add-on). Fill it in through the editor in the status page (or by hand using `apps.example.json` as the template).
-6. Start it. First boot builds each app, so allow a few minutes.
+6. Start it, open the MCP Host panel, and set each app's secrets on its page (the names it needs are
+   its `requiredSecrets`; the app shows `needs secrets` until all are present, then builds and
+   starts). Secrets are stored in the add-on's private `/data/secrets.json`, never in the add-on
+   options. Allow a few minutes for the first build.
+
+Upgrading from a version with the `secrets` list in Configuration: that list is imported once on the
+first start and then ignored. Delete the entries from Configuration afterwards.
 
 ## Expose it
 
@@ -57,7 +63,7 @@ its new public URL.
 ## Adding another MCP
 
 Use "Add app template" in the editor (or append an entry to `apps.json` by hand), then Save & apply.
-Add the app's secrets in the add-on Configuration. A port also needs adding to `config.yaml`
+Set the app's secrets on its page. A port also needs adding to `config.yaml`
 and an add-on rebuild.
 ## Known limitations
 

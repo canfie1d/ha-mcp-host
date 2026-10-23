@@ -39,6 +39,9 @@ schema:
   auto_patch: bool
   max_patches_per_day: int(1,10)
   github_token: password?
+  # Deprecated: secrets are now set on each app's page and stored in /data. This list is imported
+  # once on the first start of a version with per-app pages, then ignored. Kept in the schema so the
+  # Supervisor does not drop it before the import runs.
   secrets:
     - app: str
       name: str

@@ -6,7 +6,8 @@ import { DATA, log, readJson, recentIncidents, sleep, writeJson } from './lib/ut
 import { ManagedApp } from './lib/app.mjs';
 import { notify as sendNotify } from './lib/notify.mjs';
 import { planChanges, validateAppsConfig } from './lib/appsconfig.mjs';
-import { editorPage, statusPage } from './lib/editor.mjs';
+import { appPage, editorPage, statusPage } from './lib/editor.mjs';
+import { loadSecrets, saveSecrets, validateSecretEdit } from './lib/secrets.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CHECK_INTERVAL_MS = Number(process.env.MCPHOST_INTERVAL_MS) || 30_000;
@@ -45,7 +46,8 @@ if (!existsSync(APPS_FILE)) {
 const defs = readJson(APPS_FILE, { apps: [] }).apps;
 const stateFile = path.join(DATA, 'state.json');
 const state = readJson(stateFile, {});
-const makeApp = (d) => new ManagedApp(d, options, (state[d.name] ||= {}), notify);
+const secrets = loadSecrets(options.secrets);
+const makeApp = (d) => new ManagedApp(d, options, (state[d.name] ||= {}), notify, secrets[d.name]);
 let apps = defs.map(makeApp);
 
 /**
@@ -168,9 +170,84 @@ async function resolveSettingsUrl() {
   return settingsUrl;
 }
 
-async function page() {
-  const snaps = apps.map((a) => ({ ...a.snapshot(), description: a.def.description || '' }));
-  return statusPage(snaps, recentIncidents(15), await resolveSettingsUrl());
+const snapshots = () => apps.map((a) => ({ ...a.snapshot(), description: a.def.description || '' }));
+
+// Everything the shared page layout needs: the app list for the side nav and the link targets.
+async function layout(req, current) {
+  // HA ingress sends the panel's path prefix; pages use it as <base> so nested routes resolve.
+  const prefix = String(req.headers['x-ingress-path'] || '');
+  return {
+    base: /^\/[\w\-/]*$/.test(prefix) ? `${prefix.replace(/\/+$/, '')}/` : '/',
+    settingsUrl: await resolveSettingsUrl(),
+    nav: snapshots().map(({ name, status }) => ({ name, status })),
+    current,
+    // Secrets set in the old add-on Configuration list are no longer read after the one-time import.
+    legacySecrets: options.secrets.length,
+  };
+}
+
+async function appDetail(app) {
+  const s = app.snapshot();
+  const d = app.def;
+  return {
+    ...s,
+    description: d.description || '',
+    busy: app.busy,
+    logTail: app.tail.slice(-300),
+    version: await app.version(),
+    repo: d.repo,
+    ref: d.ref,
+    mcpPath: d.mcp?.path || null,
+    healthPath: d.health.path,
+    secrets: {
+      required: d.requiredSecrets || [],
+      set: Object.keys(app.secrets).sort(),
+    },
+    incidents: recentIncidents(500).filter((i) => i.app === app.name).slice(0, 20),
+  };
+}
+
+/** Run one manual action per app at a time; the health loop sits out while it runs. */
+function runAction(app, label, fn) {
+  if (app.busy || app.healing) return false;
+  app.busy = label;
+  log(app.name, `manual ${label}`);
+  (async () => {
+    try {
+      await fn();
+    } catch (err) {
+      app.status = 'unhealthy';
+      app.detail = err.message;
+    } finally {
+      app.busy = '';
+    }
+  })();
+  return true;
+}
+
+async function restart(app) {
+  if (app.missing.length) return;
+  app.start();
+  const h = await app.waitHealthy();
+  app.status = h.ok ? 'healthy' : 'unhealthy';
+  app.detail = h.detail;
+}
+
+function updateSecrets(app, body) {
+  const errors = validateSecretEdit(body);
+  if (errors.length) return { status: 400, body: { ok: false, errors } };
+  const next = { ...(secrets[app.name] || {}), ...(body.set || {}) };
+  for (const k of body.remove || []) delete next[k];
+  secrets[app.name] = next;
+  saveSecrets(secrets);
+  const wasWaiting = app.missing.length > 0;
+  app.setSecrets(next);
+  // New values only reach the process on start. An app that was waiting on secrets has never
+  // been built, so it gets the full bootstrap; a running one just restarts.
+  const wanted = app.missing.length ? null : wasWaiting ? 'build' : 'restart';
+  // While healing or another action runs, the values still apply on that run's next start.
+  const action = wanted && runAction(app, wanted, () => (wanted === 'build' ? bootstrap(app) : restart(app))) ? wanted : null;
+  return { status: 200, body: { ok: true, set: Object.keys(next).sort(), missing: app.missing, action, deferred: !!wanted && !action } };
 }
 
 const send = (res, status, type, body) => {
@@ -178,6 +255,9 @@ const send = (res, status, type, body) => {
   res.end(body);
 };
 const sendJson = (res, status, obj) => send(res, status, 'application/json', JSON.stringify(obj));
+// State-changing requests must be JSON, which a cross-site form cannot send.
+const isJson = (req) => String(req.headers['content-type'] || '').startsWith('application/json');
+const ACTIONS = { restart: (app) => restart(app), rebuild: (app) => bootstrap(app) };
 
 createServer(async (req, res) => {
   try {
@@ -202,8 +282,32 @@ createServer(async (req, res) => {
       }
       return sendJson(res, 405, { ok: false, errors: ['method not allowed'] });
     }
-    if (route.endsWith('/apps')) return send(res, 200, 'text/html', editorPage(await resolveSettingsUrl()));
-    return send(res, 200, 'text/html', await page());
+    const api = /\/api\/app\/([^/]+)(?:\/(secrets|restart|rebuild))?$/.exec(route);
+    if (api) {
+      const app = apps.find((a) => a.name === decodeURIComponent(api[1]));
+      if (!app) return sendJson(res, 404, { ok: false, errors: ['no such app'] });
+      const op = api[2];
+      if (!op && req.method === 'GET') return sendJson(res, 200, await appDetail(app));
+      if (!op || req.method !== (op === 'secrets' ? 'PUT' : 'POST')) {
+        return sendJson(res, 405, { ok: false, errors: ['method not allowed'] });
+      }
+      if (!isJson(req)) return sendJson(res, 415, { ok: false, errors: ['content-type must be application/json'] });
+      if (op === 'secrets') {
+        const out = updateSecrets(app, JSON.parse((await readBody(req)) || '{}'));
+        return sendJson(res, out.status, out.body);
+      }
+      if (app.missing.length) return sendJson(res, 409, { ok: false, errors: [`missing secrets: ${app.missing.join(', ')}`] });
+      if (!runAction(app, op, ACTIONS[op])) return sendJson(res, 409, { ok: false, errors: [`busy: ${app.busy || 'healing'}`] });
+      return sendJson(res, 202, { ok: true });
+    }
+    const page = /\/app\/([^/]+)$/.exec(route);
+    if (page) {
+      const app = apps.find((a) => a.name === decodeURIComponent(page[1]));
+      if (app) return send(res, 200, 'text/html', appPage(await appDetail(app), await layout(req, app.name)));
+      return send(res, 404, 'text/html', statusPage(snapshots(), recentIncidents(15), await layout(req, null), 'No app by that name.'));
+    }
+    if (route.endsWith('/apps')) return send(res, 200, 'text/html', editorPage(await layout(req, 'apps')));
+    return send(res, 200, 'text/html', statusPage(snapshots(), recentIncidents(15), await layout(req, '')));
   } catch (err) {
     log('supervisor', `http error: ${err.stack || err}`);
     sendJson(res, 500, { ok: false, errors: [err.message] });
