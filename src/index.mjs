@@ -131,14 +131,14 @@ function readBody(req, limit = 256 * 1024) {
 async function bootstrap(app) {
   if (app.missing.length) {
     app.status = 'needs-secrets';
-    log(app.name, `not started, missing secrets: ${app.missing.join(', ')}`);
+    app.note(`not started, missing secrets: ${app.missing.join(', ')}`);
     return;
   }
   try {
     await app.sync();
     const b = await app.build();
     if (!b.ok) {
-      app.tail.push(...b.output.split('\n').slice(-60));
+      app.record(b.output.split('\n').slice(-60).join('\n'));
       app.status = 'unhealthy';
       app.fails = 3; // go straight to the healing ladder on the first tick
       return;
@@ -193,8 +193,9 @@ async function appDetail(app) {
     ...s,
     description: d.description || '',
     busy: app.busy,
-    logTail: app.tail.slice(-300),
+    logTail: app.tail.slice(),
     version: await app.version(),
+    lastFetch: app.lastFetch,
     repo: d.repo,
     ref: d.ref,
     mcpPath: d.mcp?.path || null,
@@ -211,7 +212,7 @@ async function appDetail(app) {
 function runAction(app, label, fn) {
   if (app.busy || app.healing) return false;
   app.busy = label;
-  log(app.name, `manual ${label}`);
+  app.note(`manual ${label}`);
   (async () => {
     try {
       await fn();
@@ -322,7 +323,7 @@ async function main() {
   if (unhealthy.length) log('supervisor', `starting unhealthy: ${unhealthy.map((a) => a.name).join(', ')}`);
 
   for (;;) {
-    await Promise.all(apps.map((a) => a.tick().catch((err) => log(a.name, `tick error: ${err.message}`))));
+    await Promise.all(apps.map((a) => a.tick().catch((err) => a.note(`tick error: ${err.message}`))));
     if (apps.some((a) => a.state.dirty)) {
       for (const a of apps) delete a.state.dirty;
       writeJson(stateFile, state);

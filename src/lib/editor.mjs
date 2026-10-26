@@ -199,6 +199,7 @@ input{font:inherit;font-size:13px;width:100%;box-sizing:border-box;padding:6px 1
 #smsg.ok{color:var(--ok)}#smsg.bad{color:var(--bad)}
 .logbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:28px 0 10px}
 .logbar h2{margin:0}
+.logtools{display:flex;align-items:center;gap:8px}
 pre#log{margin:0;max-height:420px;overflow:auto;padding:12px 14px;border:1px solid var(--line);border-radius:14px;background:var(--field);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
 @media (max-width:560px){.secrets td.name{width:auto}.secrets tr{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}.secrets td{border:0;padding:0}.secrets tr{border-top:1px solid var(--line);padding:10px 0}.secrets tr:first-child{border-top:0;padding-top:0}.secrets td.name{grid-column:1/-1}.add{grid-template-columns:minmax(0,1fr) auto}.add input:first-child{grid-column:1/-1}}
 `;
@@ -212,7 +213,10 @@ export function appPage(app, layout) {
   const commit = v
     ? `<span class="mono">${esc(v.sha.slice(0, 8))}</span><span class="sub">${esc(v.subject)}</span><span class="sub">${esc(v.date)}</span>`
     : '<span class="hint">not checked out yet</span>';
-  const upstream = !v || v.ahead === null
+  const f = app.lastFetch;
+  const upstream = f && !f.ok
+    ? `<span class="warn">Last fetch of ${esc(app.ref)} failed, so Pull &amp; rebuild reused the existing checkout</span><span class="sub mono">${esc(f.error || 'no output')}</span><span class="sub">${esc(f.at)}</span>`
+    : !v || v.ahead === null
     ? '—'
     : v.ahead
       ? `<span class="warn">${esc(v.ahead)} local commit(s) not on ${esc(app.ref)}${v.behind ? `, ${esc(v.behind)} behind` : ''}</span><span class="sub">Usually an auto-fix patch. Pull &amp; rebuild will not fast-forward until the checkout matches ${esc(app.ref)}.</span>`
@@ -251,7 +255,7 @@ ${app.description ? `<p class="lede">${esc(app.description)}</p>` : ''}
 <div id="smsg"></div>
 </section>
 
-<div class="logbar"><h2>Logs</h2><span class="hint" id="logstate">live</span></div>
+<div class="logbar"><h2>Logs</h2><div class="logtools"><span class="hint" id="logstate">live</span><button id="copylog">Copy</button><button id="savelog">Download</button></div></div>
 <pre id="log"></pre>
 
 <h2 class="section-title">Incidents</h2>
@@ -273,12 +277,55 @@ function renderStatus(){
   const locked=!!data.busy||data.status==='healing'||data.status==='needs-secrets';
   $('restart').disabled=$('rebuild').disabled=locked;
 }
+const pad=n=>String(n).padStart(2,'0');
+// Lines arrive as "<ISO time> text"; show the time in this browser's zone.
+function localLine(l){
+  const m=/^(\\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z) (.*)$/.exec(l);
+  if(!m)return l;
+  const d=new Date(m[1]);
+  if(isNaN(d))return l;
+  return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+' '+pad(d.getHours())+':'+pad(d.getMinutes())+':'+pad(d.getSeconds())+'  '+m[2];
+}
+const logText=()=>(data.logTail||[]).map(localLine).join('\\n');
+function selectingLog(){
+  const s=getSelection();
+  return s&&!s.isCollapsed&&s.rangeCount&&$('log').contains(s.getRangeAt(0).commonAncestorContainer);
+}
 function renderLogs(){
   const el=$('log'),atEnd=el.scrollHeight-el.scrollTop-el.clientHeight<24;
-  el.textContent=(data.logTail||[]).join('\\n')||'No output yet.';
+  // Replacing the text would drop a selection the user is making to copy.
+  if(selectingLog()){$('logstate').textContent='paused while selecting';return}
+  el.textContent=logText()||'No output yet.';
   if(atEnd)el.scrollTop=el.scrollHeight;
   $('logstate').textContent=atEnd?'live':'live · scrolled up';
 }
+function logNote(t){$('logstate').textContent=t;setTimeout(renderLogs,2500)}
+// The HA ingress iframe may not allow the async clipboard API, so fall back to
+// execCommand, then to selecting the log for a manual copy.
+$('copylog').onclick=async()=>{
+  const text=logText();
+  let ok=false;
+  try{await navigator.clipboard.writeText(text);ok=true}catch{}
+  if(!ok){
+    const t=document.createElement('textarea');
+    t.value=text;t.setAttribute('readonly','');t.style.cssText='position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(t);t.select();
+    try{ok=document.execCommand('copy')}catch{}
+    t.remove();
+  }
+  if(ok){logNote('copied '+(data.logTail||[]).length+' lines');return}
+  const r=document.createRange();r.selectNodeContents($('log'));
+  const s=getSelection();s.removeAllRanges();s.addRange(r);
+  $('logstate').textContent='selected; press Ctrl+C or ⌘C';
+};
+$('savelog').onclick=()=>{
+  const d=new Date(),stamp=d.getFullYear()+pad(d.getMonth()+1)+pad(d.getDate())+'-'+pad(d.getHours())+pad(d.getMinutes());
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([logText()+'\\n'],{type:'text/plain'}));
+  a.download=NAME+'-'+stamp+'.log';
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+};
 function renderSecrets(){
   const req=data.secrets.required,set=new Set(data.secrets.set);
   const names=[...req,...data.secrets.set.filter(n=>!req.includes(n))];
