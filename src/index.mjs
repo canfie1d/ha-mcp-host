@@ -12,6 +12,8 @@ import { loadSecrets, saveSecrets, validateSecretEdit } from './lib/secrets.mjs'
 const here = path.dirname(fileURLToPath(import.meta.url));
 const CHECK_INTERVAL_MS = Number(process.env.MCPHOST_INTERVAL_MS) || 30_000;
 const STATUS_PORT = Number(process.env.MCPHOST_STATUS_PORT) || 8100;
+const SUPERVISOR_IP = '172.30.32.2';
+const TRUST_ALL = process.env.MCPHOST_TRUST_ALL === '1'; // local dev only
 
 const options = {
   anthropic_api_key: '',
@@ -289,6 +291,13 @@ createServer(async (req, res) => {
       if (!app) return sendJson(res, 404, { ok: false, errors: ['no such app'] });
       const op = api[2];
       if (!op && req.method === 'GET') return sendJson(res, 200, await appDetail(app));
+      if (op === 'secrets' && req.method === 'GET') {
+        // Plaintext values: only through HA ingress (the Supervisor), and only from the page's own fetch.
+        const peer = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+        if (!TRUST_ALL && peer !== SUPERVISOR_IP) return sendJson(res, 403, { ok: false, errors: ['secrets are only available through Home Assistant'] });
+        if (req.headers['x-requested-with'] !== 'admin') return sendJson(res, 400, { ok: false, errors: ['missing header'] });
+        return sendJson(res, 200, { ok: true, values: { ...app.secrets } });
+      }
       if (!op || req.method !== (op === 'secrets' ? 'PUT' : 'POST')) {
         return sendJson(res, 405, { ok: false, errors: ['method not allowed'] });
       }
