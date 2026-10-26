@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.13
+
+- Show stored secrets on app pages (#10)
+
 ## 1.0.12
 
 - Timestamp app logs, show host messages there, and add Copy/Download (#9)

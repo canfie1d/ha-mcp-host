@@ -1,5 +1,5 @@
 name: MCP Host
-version: "1.0.12"
+version: "1.0.13"
 slug: mcp_host
 description: Hosts your MCP servers and automatically heals them when they break
 arch:
