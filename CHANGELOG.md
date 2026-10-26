@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.12
+
+- Timestamp app logs, show host messages there, and add Copy/Download (#9)
+
 ## 1.0.11
 
 - Update checkouts that the build left with modified tracked files (#8)
