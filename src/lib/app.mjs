@@ -9,6 +9,9 @@ const FAILS_BEFORE_HEAL = 3;
 const GIVE_UP_COOLDOWN_MS = 30 * 60_000;
 const STARTUP_WAIT_MS = 90_000;
 const WARN_RENOTIFY_MS = 12 * 60 * 60_000;
+const TAIL_LINES = 500;
+// Terminal colour and cursor codes, which render as boxes on the app page.
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 
 export class ManagedApp {
   constructor(def, options, state, notify, secrets = {}) {
@@ -19,7 +22,8 @@ export class ManagedApp {
     this.repoDir = path.join(DATA, 'apps', def.name);
     this.setSecrets(secrets);
     this.child = null;
-    this.tail = [];
+    this.tail = []; // "<ISO time> <line>", newest last
+    this.lastFetch = null; // { ok, at, error } from the last sync with the upstream ref
     this.fails = 0;
     this.goodStreak = 0;
     this.status = 'starting';
@@ -30,6 +34,21 @@ export class ManagedApp {
     this.warnedAt = 0;
     this.retired = false; // set when removed/replaced via the apps editor; must never start again
     this.busy = ''; // name of a manual action (restart, rebuild) in progress; pauses health ticks
+  }
+
+  /** Add output to the log tail as one timestamped line per line of text. */
+  record(text) {
+    const at = new Date().toISOString();
+    const lines = String(text).replace(ANSI, '').split(/\r?\n/).filter((l) => l.trim());
+    if (!lines.length) return;
+    this.tail.push(...lines.map((l) => `${at} ${l}`));
+    if (this.tail.length > TAIL_LINES) this.tail = this.tail.slice(-TAIL_LINES);
+  }
+
+  /** A host message about this app: goes to the add-on log and to the app's own log. */
+  note(msg) {
+    log(this.name, msg);
+    this.record(`[host] ${msg}`);
   }
 
   setSecrets(secrets) {
@@ -58,6 +77,7 @@ export class ManagedApp {
       : '';
     const scrub = (t) => (token ? t.replaceAll(token, '***') : t);
     if (!fileExists(path.join(this.repoDir, '.git'))) {
+      this.note(`cloning ${this.def.repo} (${this.def.ref})`);
       const r = await run(`git ${auth}clone --branch ${this.def.ref} ${this.def.repo} ${this.repoDir}`);
       if (r.code !== 0) throw new Error(`clone failed: ${scrub(r.output).slice(-500)}`);
       return;
@@ -66,9 +86,12 @@ export class ManagedApp {
     // (e.g. a locally kept auto-patch) is left alone rather than clobbered.
     const f = await run(`git ${auth}fetch origin ${this.def.ref}`, { cwd: this.repoDir });
     if (f.code !== 0) {
-      log(this.name, `fetch failed, using existing checkout: ${scrub(f.output).slice(-200)}`);
+      const error = scrub(f.output).trim().slice(-300);
+      this.lastFetch = { ok: false, at: new Date().toISOString(), error };
+      this.note(`fetch failed, using existing checkout: ${error}`);
       return;
     }
+    this.lastFetch = { ok: true, at: new Date().toISOString(), error: null };
     const before = await this.head();
     // Uncommitted edits to tracked files are always disposable here: builds regenerate committed
     // files (e.g. a TanStack routeTree.gen.ts) and an unkept Claude patch is reset. They would
@@ -82,8 +105,9 @@ export class ManagedApp {
     // Release tags give the app page a real version. Best effort, and only after the merge,
     // since this fetch replaces FETCH_HEAD.
     await run(`git ${auth}fetch --force origin "+refs/tags/*:refs/tags/*"`, { cwd: this.repoDir });
-    if (m.code !== 0) log(this.name, 'checkout has local commits; not fast-forwarding');
-    else if (after !== before) log(this.name, `updated ${before.slice(0, 8)} -> ${after.slice(0, 8)}`);
+    if (m.code !== 0) this.note('checkout has local commits; not fast-forwarding');
+    else if (after !== before) this.note(`updated ${before.slice(0, 8)} -> ${after.slice(0, 8)}`);
+    else this.note(`already at ${after.slice(0, 8)}, the latest on ${this.def.ref}`);
   }
 
   /** Install and build. Install/build run with devDependencies available. */
@@ -110,19 +134,37 @@ export class ManagedApp {
       cwd: this.repoDir,
       env: { PATH: process.env.PATH, HOME: process.env.HOME || '/root', ...this.env() },
     });
+    // Chunks can end mid-line; hold the partial line so each line gets one timestamp.
+    const sinkFor = () => {
+      let rest = '';
+      const write = (d) => {
+        out.write(d);
+        const parts = (rest + String(d)).split('\n');
+        rest = parts.pop();
+        if (parts.length) this.record(parts.join('\n'));
+      };
+      write.flush = () => {
+        if (rest) this.record(rest);
+        rest = '';
+      };
+      return write;
+    };
+    const stdout = sinkFor();
+    const stderr = sinkFor();
     const sink = (d) => {
       out.write(d);
-      this.tail.push(...String(d).split('\n'));
-      if (this.tail.length > 300) this.tail = this.tail.slice(-300);
+      this.record(d);
     };
-    child.stdout.on('data', sink);
-    child.stderr.on('data', sink);
+    child.stdout.on('data', stdout);
+    child.stderr.on('data', stderr);
     child.on('error', (err) => {
       sink(`\n[supervisor] failed to spawn: ${err.message}\n`);
       this.detail = `spawn failed: ${err.message}`;
       if (this.child === child) this.child = null;
     });
     child.on('exit', (code, sig) => {
+      stdout.flush();
+      stderr.flush();
       sink(`\n[supervisor] process exited code=${code} signal=${sig}\n`);
       if (this.child === child) this.child = null;
     });
@@ -233,7 +275,7 @@ export class ManagedApp {
     this.status = 'healing';
     const steps = [];
     const outcome = async (name, fn) => {
-      log(this.name, `heal: ${name}`);
+      this.note(`heal: ${name}`);
       steps.push(name);
       const ok = await fn();
       if (ok) {
@@ -254,7 +296,7 @@ export class ManagedApp {
         this.stop();
         const b = await this.build({ clean });
         if (!b.ok) {
-          this.tail.push(...b.output.split('\n').slice(-60));
+          this.record(b.output.split('\n').slice(-60).join('\n'));
           return false;
         }
         return restart();
@@ -353,7 +395,7 @@ export class ManagedApp {
       incident({ app: this.name, failure, claudeSummary: result.summary, outcome: 'not fixed' });
       return false;
     } catch (err) {
-      log(this.name, `claude patch error: ${err.message}`);
+      this.note(`claude patch error: ${err.message}`);
       await run(`git reset --hard ${before} && git clean -fd`, { cwd: this.repoDir });
       return false;
     }
