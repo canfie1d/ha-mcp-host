@@ -189,8 +189,9 @@ const APP_CSS = `
 .secrets{width:100%;border-collapse:collapse}
 .secrets td{padding:8px 0;border-top:1px solid var(--line);vertical-align:middle}
 .secrets tr:first-child td{border-top:0}
-.secrets td.name{width:38%;padding-right:12px;overflow-wrap:anywhere}
+.secrets td.name{width:26%;padding-right:12px;overflow-wrap:anywhere}
 .secrets td.act{width:1%;white-space:nowrap;padding-left:8px}
+.secrets td.val{width:22%;padding-right:8px}.secrets td input{min-width:140px}.secrets td.val code{overflow-wrap:anywhere;word-break:break-all}.secrets td.val .none{color:var(--muted)}
 .tag{display:inline-block;margin-left:6px;font:600 11px/1.6 Roboto,system-ui,sans-serif;padding:0 6px;border-radius:999px;border:1px solid currentColor;vertical-align:1px}
 .tag.set{color:var(--ok)}.tag.missing{color:var(--warn)}.tag.extra{color:var(--muted)}
 input{font:inherit;font-size:13px;width:100%;box-sizing:border-box;padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--field);color:var(--fg)}
@@ -249,7 +250,8 @@ ${app.description ? `<p class="lede">${esc(app.description)}</p>` : ''}
 
 <h2 class="section-title">Secrets</h2>
 <section class="panel">
-<p class="hint" style="margin-bottom:10px">Passed to the app as environment variables. Values are write-only: they are stored in the add-on's private <code>/data</code> and never shown again. Saving restarts the app.</p>
+<p class="hint" style="margin-bottom:10px">Passed to the app as environment variables. Stored in the add-on's private <code>/data</code>. Values stay hidden until you choose Show, and are only served through Home Assistant. Saving restarts the app.</p>
+<div style="text-align:right;margin-bottom:6px"><button id="revealall" hidden>Show all</button></div>
 <table class="secrets"><tbody id="srows"></tbody></table>
 <form class="add" id="sadd" autocomplete="off"><input id="sname" placeholder="NEW_SECRET_NAME" spellcheck="false" aria-label="New secret name"><input id="sval" type="password" placeholder="value" aria-label="New secret value"><button class="primary">Add</button></form>
 <div id="smsg"></div>
@@ -326,14 +328,27 @@ $('savelog').onclick=()=>{
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 };
+let vals=null;const shown=new Set();
+const API_HDR={'x-requested-with':'admin'};
+async function fetchVals(){
+  if(vals)return true;
+  const r=await fetch(API+'/secrets',{cache:'no-store',headers:API_HDR});
+  if(!r.ok){const j=await r.json().catch(()=>({}));smsg('bad',(j.errors||['Could not load values']).map(esc).join('<br>'));return false}
+  vals=(await r.json()).values;return true;
+}
 function renderSecrets(){
   const req=data.secrets.required,set=new Set(data.secrets.set);
   const names=[...req,...data.secrets.set.filter(n=>!req.includes(n))];
+  $('revealall').hidden=!set.size;$('revealall').textContent=shown.size?'Hide all':'Show all';
   $('srows').innerHTML=names.length?names.map(n=>{
     const tag=!req.includes(n)?'<span class="tag extra" title="Not listed in requiredSecrets">extra</span>':set.has(n)?'<span class="tag set">set</span>':'<span class="tag missing">missing</span>';
+    const shownHere=set.has(n)&&shown.has(n)&&vals&&n in vals;
+    const val=!set.has(n)?'<span class="none">—</span>':'<code>'+(shownHere?esc(vals[n]):'••••••••')+'</code>';
+    const reveal=set.has(n)?'<button data-op="show">'+(shownHere?'Hide':'Show')+'</button> ':'';
     return '<tr data-name="'+esc(n)+'"><td class="name"><code>'+esc(n)+'</code>'+tag+'</td>'
-      +'<td><input type="password" autocomplete="new-password" placeholder="'+(set.has(n)?'•••••••• (enter to replace)':'value')+'" aria-label="'+esc(n)+' value"></td>'
-      +'<td class="act"><button data-op="save">Save</button> '+(set.has(n)?'<button data-op="remove">Remove</button>':'')+'</td></tr>';
+      +'<td class="val">'+val+'</td>'
+      +'<td><input type="password" autocomplete="new-password" placeholder="'+(set.has(n)?'new value (enter to replace)':'value')+'" aria-label="'+esc(n)+' value"></td>'
+      +'<td class="act">'+reveal+'<button data-op="save">Save</button> '+(set.has(n)?'<button data-op="remove">Remove</button>':'')+'</td></tr>';
   }).join(''):'<tr><td class="hint">This app declares no required secrets.</td></tr>';
 }
 function smsg(c,h){$('smsg').className=c;$('smsg').innerHTML=h}
@@ -341,7 +356,7 @@ async function putSecrets(body){
   const r=await fetch(API+'/secrets',{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(!j.ok){smsg('bad',(j.errors||['Save failed']).map(esc).join('<br>'));return false}
-  data.secrets.set=j.set;renderSecrets();
+  data.secrets.set=j.set;vals=null;if(shown.size&&await fetchVals()){for(const n of [...shown])if(!(n in vals))shown.delete(n)}else shown.clear();renderSecrets();
   const next=j.deferred?' The app is busy; the new values apply the next time it starts.':j.action==='build'?' All required secrets are set; building and starting now.':j.action==='restart'?' Restarting with the new values.':j.missing.length?' Still missing: '+j.missing.map(esc).join(', ')+'.':'';
   smsg('ok','Saved.'+next);
   refresh();
@@ -350,11 +365,14 @@ async function putSecrets(body){
 $('srows').addEventListener('click',async e=>{
   const b=e.target.closest('button');if(!b)return;
   const row=b.closest('tr'),n=row.dataset.name,input=row.querySelector('input');
+  if(b.dataset.op==='show'){if(shown.has(n)){shown.delete(n);if(!shown.size)vals=null}else if(await fetchVals())shown.add(n);renderSecrets();return}
   if(b.dataset.op==='remove'){if(confirm('Remove '+n+'?'))await putSecrets({remove:[n]});return}
+  if(b.dataset.op!=='save')return;
   if(!input.value){input.focus();smsg('bad','Enter a value for '+esc(n)+' first.');return}
   if(await putSecrets({set:{[n]:input.value}}))input.value='';
 });
 $('srows').addEventListener('keydown',e=>{if(e.key==='Enter'&&e.target.matches('input')){e.preventDefault();e.target.closest('tr').querySelector('[data-op=save]').click()}});
+$('revealall').onclick=async()=>{if(shown.size){shown.clear();vals=null}else if(await fetchVals())data.secrets.set.forEach(n=>shown.add(n));renderSecrets()};
 $('sadd').addEventListener('submit',async e=>{
   e.preventDefault();
   const n=$('sname').value.trim(),v=$('sval').value;
